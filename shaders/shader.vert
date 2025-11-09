@@ -10,20 +10,31 @@ layout (location = 2) out vec2 f_uv;
 
 layout (binding = 0, std140) uniform SceneUniforms {
 	mat4 view_projection;
+    vec3 view_position;
+    vec3 ambient_light_intensity;
+    vec3 sun_light_direction;
+    vec3 sun_light_color;
+
+    uint point_lights_count;
+    uint spot_lights_count;
 };
 
 layout (binding = 1, std140) uniform ModelUniforms {
 	mat4 model;
-	vec3 albedo_color;
+    vec3 albedo_color;
+    vec3 specular_color;
+    float shininess;
 };
 
 void main() {
 	vec4 position = model * vec4(v_position, 1.0f);
-	vec4 normal = model * vec4(v_normal, 0.0f);
+
+	mat3 normal_matrix = transpose(inverse(mat3(model)));
+    vec3 world_normal = normalize(normal_matrix * v_normal);
 
 	gl_Position = view_projection * position;
 
 	f_position = position.xyz;
-	f_normal = normal.xyz;
+	f_normal = world_normal;
 	f_uv = v_uv;
 }

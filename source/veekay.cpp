@@ -19,8 +19,8 @@
 
 namespace {
 
-constexpr uint32_t window_default_width = 1280;
-constexpr uint32_t window_default_height = 720;
+constexpr uint32_t window_default_width = 1920;
+constexpr uint32_t window_default_height = 1080;
 constexpr char window_title[] = "Veekay";
 
 constexpr uint32_t max_frames_in_flight = 2;
@@ -804,3 +804,7 @@ int veekay::run(const veekay::ApplicationInfo& app_info) {
 	
 	return 0;
 }
+
+
+
+
