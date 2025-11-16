@@ -37,8 +37,10 @@ layout (binding = 1, std140) uniform ModelUniforms {
     mat4 model;
     vec3 albedo_color; float _pad10;
     vec3 specular_color; float _pad12;
+    uint t_idx;
+    uint _pad14;
     float shininess;
-    uint _pad13[3];
+    uint _pad13;
 } model;
 
 layout(binding = 2, std430) readonly buffer PointLights {
@@ -49,11 +51,24 @@ layout(binding = 3, std430) readonly buffer SpotLights {
     SpotLight spot_lights[];
 };
 
+layout (binding = 4) uniform sampler2D albedo_texture;
+layout (binding = 5) uniform sampler2D batman_texture;
+
 // Функция для расчета освещения по модели Блинна-Фонга
 vec3 calculateBlinnPhong(vec3 lightDir, vec3 normal, vec3 viewDir, vec3 lightColor) {
+    vec4 texel;
+    switch (model.t_idx) 
+    {
+    case 1:
+        texel = texture(batman_texture, f_uv);
+        break;
+    default:
+        texel = texture(albedo_texture, f_uv);
+        break;
+    }
     // diffuse
     float diff = max(dot(normal, lightDir), 0.0);
-    vec3 diffuse = diff * model.albedo_color * lightColor;
+    vec3 diffuse = diff * texel.rgb * lightColor;
     
     // specular
     vec3 halfwayDir = normalize(lightDir + viewDir);
@@ -64,11 +79,22 @@ vec3 calculateBlinnPhong(vec3 lightDir, vec3 normal, vec3 viewDir, vec3 lightCol
 }
 
 void main() {
+    vec4 texel;
+    switch (model.t_idx) 
+    {
+    case 1:
+        texel = texture(batman_texture, f_uv);
+        break;
+    default:
+        texel = texture(albedo_texture, f_uv);
+        break;
+    }
+
     vec3 normal = normalize(f_normal);
     vec3 viewDir = normalize(scene.view_position - f_position);
     
     // ambient
-    vec3 result = model.albedo_color * scene.ambient_light_intensity;
+    vec3 result = texel.rgb * scene.ambient_light_intensity;
     
     // sun
     vec3 sunLightDir = normalize(-scene.sun_light_direction);

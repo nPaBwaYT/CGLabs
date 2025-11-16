@@ -56,8 +56,10 @@ struct ModelUniforms {
 	veekay::vec3 albedo_color; float _pad0;
 	
 	veekay::vec3 specular_color; float _pad2;
+	uint32_t t_idx;
+	uint32_t _pad3;
 	float shininess; 
-	uint32_t _pad3[3];
+	uint32_t _pad4;
 };
 
 typedef struct PointLight {
@@ -92,6 +94,7 @@ struct Model {
 	veekay::vec3 albedo_color;
 	
 	veekay::vec3 specular_color;
+	uint32_t t_idx;
 	float shininess; 
 };
 
@@ -154,7 +157,9 @@ inline namespace {
 	VkSampler missing_texture_sampler;
 
 	veekay::graphics::Texture* texture;
+	veekay::graphics::Texture* batman_texture;
 	VkSampler texture_sampler;
+	VkSampler batman_sampler;
 }
 
 float toRadians(float degrees) {
@@ -417,6 +422,10 @@ void initialize(VkCommandBuffer cmd) {
 				{
 					.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 					.descriptorCount = 8,
+				},
+				{
+					.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.descriptorCount = 8,
 				}
 			};
 			
@@ -462,7 +471,21 @@ void initialize(VkCommandBuffer cmd) {
 					.descriptorCount = 1,
 					.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 				},
+				{
+					.binding = 4,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.descriptorCount = 1,
+					.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+				},
+				{
+					.binding = 5,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.descriptorCount = 1,
+					.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+				},
+
 			};
+
 
 			VkDescriptorSetLayoutCreateInfo info{
 				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -552,7 +575,46 @@ void initialize(VkCommandBuffer cmd) {
         nullptr,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
+	{
+		
+		// Считываем данные об изображении из файла
+		uint32_t width, height;
+		std::vector<uint8_t> pixels;
+		lodepng::decode(pixels, width, height, "./assets/lenna.png");
 
+		// Создаем текстуру с данными об изображении
+		texture = new veekay::graphics::Texture(
+			cmd, width, height,
+			VK_FORMAT_R8G8B8A8_UNORM, // 8 бит на каждый канал цвета
+			pixels.data());
+		
+		pixels.clear();
+		lodepng::decode(pixels, width, height, "./assets/batman.png");
+
+		// Создаем текстуру с данными об изображении
+		batman_texture = new veekay::graphics::Texture(
+			cmd, width, height,
+			VK_FORMAT_R8G8B8A8_UNORM, // 8 бит на каждый канал цвета
+			pixels.data());
+		
+		VkSamplerCreateInfo info{
+			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+			.magFilter = VK_FILTER_LINEAR, // Фильтрация если плотность текселей меньше
+			.minFilter = VK_FILTER_LINEAR, // Фильтрация если плотность больше
+			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST, // Фильтрация мип-мапов
+			// Что делать, если по какой-то из осей вышли за границы текстурных коорд-т
+			.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.anisotropyEnable = true, // Включить анизотропную фильтрацию?
+			.maxAnisotropy = 16.0f,   // Кол-во сэмплов анизотропной фильтрации
+			.minLod = 0.0f, // Минимальный уровень мипа
+		.maxLod = VK_LOD_CLAMP_NONE, // Максимальный уровень мипа (тут бескоченость)
+		};
+
+		vkCreateSampler(device, &info, nullptr, &texture_sampler);
+		vkCreateSampler(device, &info, nullptr, &batman_sampler);
+	}
 	// NOTE: This texture and sampler is used when texture could not be loaded
 	{
 		VkSamplerCreateInfo info{
@@ -575,6 +637,21 @@ void initialize(VkCommandBuffer cmd) {
 		                                                VK_FORMAT_B8G8R8A8_UNORM,
 		                                                pixels);
 	}
+
+	VkDescriptorImageInfo image_infos[] = {
+		{
+			.sampler = texture_sampler,         // Какой сэмплер будет использоваться
+			.imageView = texture->view, // Какая текстура будет использоваться
+	// Формат текстуры будет использован оптимальный для чтения в шейдере
+			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		},
+		{
+			.sampler = texture_sampler,         // Какой сэмплер будет использоваться
+			.imageView = batman_texture->view, // Какая текстура будет использоваться
+	// Формат текстуры будет использован оптимальный для чтения в шейдере
+			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		},
+	};
 
 	{
 		VkDescriptorBufferInfo buffer_infos[] = {
@@ -637,6 +714,24 @@ void initialize(VkCommandBuffer cmd) {
 				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.pBufferInfo = &buffer_infos[3],
 			},
+			{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = descriptor_set,
+				.dstBinding = 4,
+				.dstArrayElement = 0,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &image_infos[0],
+			},
+			{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = descriptor_set,
+				.dstBinding = 5,
+				.dstArrayElement = 0,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &image_infos[1],
+			},
 		};
 
 		vkUpdateDescriptorSets(device, sizeof(write_infos) / sizeof(write_infos[0]),
@@ -677,39 +772,39 @@ void initialize(VkCommandBuffer cmd) {
 		std::vector<Vertex> vertices = {
 		
 			{{-0.5f, -0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f}},
-			{{+0.5f, -0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f}}, 
-			{{+0.5f, +0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f}},
-			{{-0.5f, +0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f}}, 
+			{{+0.5f, -0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, {1.0f, 0.0f}}, 
+			{{+0.5f, +0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, {1.0f, 1.0f}},
+			{{-0.5f, +0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f}}, //front
 
 		
 			{{+0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-			{{+0.5f, -0.5f, +0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},   
-			{{+0.5f, +0.5f, +0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-			{{+0.5f, +0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}}, 
+			{{+0.5f, -0.5f, +0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},   
+			{{+0.5f, +0.5f, +0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 1.0f}},
+			{{+0.5f, +0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f}}, //right
 
 		
 			{{+0.5f, -0.5f, +0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
-			{{-0.5f, -0.5f, +0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},   
-			{{-0.5f, +0.5f, +0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
-			{{+0.5f, +0.5f, +0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
+			{{-0.5f, -0.5f, +0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},   
+			{{-0.5f, +0.5f, +0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+			{{+0.5f, +0.5f, +0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}}, //back
 
 		
 			{{-0.5f, -0.5f, +0.5f}, {-1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-			{{-0.5f, -0.5f, -0.5f}, {-1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},   
-			{{-0.5f, +0.5f, -0.5f}, {-1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-			{{-0.5f, +0.5f, +0.5f}, {-1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+			{{-0.5f, -0.5f, -0.5f}, {-1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},   
+			{{-0.5f, +0.5f, -0.5f}, {-1.0f, 0.0f, 0.0f}, {1.0f, 1.0f}},
+			{{-0.5f, +0.5f, +0.5f}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f}}, //left
 
 		
 			{{-0.5f, -0.5f, +0.5f}, {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f}},
-			{{+0.5f, -0.5f, +0.5f}, {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f}},   
-			{{+0.5f, -0.5f, -0.5f}, {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f}},
-			{{-0.5f, -0.5f, -0.5f}, {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f}},
+			{{+0.5f, -0.5f, +0.5f}, {0.0f, -1.0f, 0.0f}, {1.0f, 0.0f}},   
+			{{+0.5f, -0.5f, -0.5f}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f}},
+			{{-0.5f, -0.5f, -0.5f}, {0.0f, -1.0f, 0.0f}, {0.0f, 1.0f}}, //top
 
 		
 			{{-0.5f, +0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-			{{+0.5f, +0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},   
-			{{+0.5f, +0.5f, +0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-			{{-0.5f, +0.5f, +0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+			{{+0.5f, +0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},   
+			{{+0.5f, +0.5f, +0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}},
+			{{-0.5f, +0.5f, +0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}}, //bottom
 		};
 
 		std::vector<uint32_t> indices = {
@@ -739,6 +834,7 @@ void initialize(VkCommandBuffer cmd) {
 		.albedo_color = veekay::vec3{0.4f, 0.4f, 0.4f},
 		
 		.specular_color = veekay::vec3{0.4f, 0.4f, 0.4f},
+		.t_idx = 0,
 		.shininess = 1.0f,
 	});
 
@@ -753,6 +849,7 @@ void initialize(VkCommandBuffer cmd) {
 		.albedo_color = veekay::vec3{0.0f, 1.0f, 0.0f},
 		
 		.specular_color = veekay::vec3{0.7f, 0.8f, 0.7f},
+		.t_idx = 1,
 		.shininess = 128.0f,
 	});
 
@@ -766,6 +863,7 @@ void initialize(VkCommandBuffer cmd) {
 		.albedo_color = veekay::vec3{1.0f, 0.0f, 0.0f},
 		
 		.specular_color = veekay::vec3{0.8f, 0.7f, 0.7f},
+		.t_idx = 1,
 		.shininess = 84.0f,
 	});	
 
@@ -777,6 +875,7 @@ void initialize(VkCommandBuffer cmd) {
 		.albedo_color = veekay::vec3{0.0f, 0.0f, 1.0f},
 		
 		.specular_color = veekay::vec3{0.7f, 0.7f, 0.8f},
+		.t_idx = 1,
 		.shininess = 156.0f,
 	});
 
@@ -825,6 +924,12 @@ void shutdown() {
 
 	delete point_lights_buffer;
     delete spot_lights_buffer;
+
+	vkDestroySampler(device, batman_sampler, nullptr);
+	delete batman_texture;
+
+	vkDestroySampler(device, texture_sampler, nullptr);
+	delete texture;
 
 	vkDestroyDescriptorSetLayout(device, descriptor_set_layout, nullptr);
 	vkDestroyDescriptorPool(device, descriptor_pool, nullptr);
@@ -1059,6 +1164,7 @@ void update(double time) {
         uniforms.albedo_color = model.albedo_color;
 		
         uniforms.specular_color = model.specular_color;
+		uniforms.t_idx = model.t_idx;
         uniforms.shininess = model.shininess;
     }
 
