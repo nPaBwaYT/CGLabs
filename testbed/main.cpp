@@ -159,7 +159,6 @@ inline namespace {
 	veekay::graphics::Texture* texture;
 	veekay::graphics::Texture* batman_texture;
 	VkSampler texture_sampler;
-	VkSampler batman_sampler;
 }
 
 float toRadians(float degrees) {
@@ -613,7 +612,6 @@ void initialize(VkCommandBuffer cmd) {
 		};
 
 		vkCreateSampler(device, &info, nullptr, &texture_sampler);
-		vkCreateSampler(device, &info, nullptr, &batman_sampler);
 	}
 	// NOTE: This texture and sampler is used when texture could not be loaded
 	{
@@ -924,11 +922,10 @@ void shutdown() {
 
 	delete point_lights_buffer;
     delete spot_lights_buffer;
-
-	vkDestroySampler(device, batman_sampler, nullptr);
-	delete batman_texture;
+	
 
 	vkDestroySampler(device, texture_sampler, nullptr);
+	delete batman_texture;
 	delete texture;
 
 	vkDestroyDescriptorSetLayout(device, descriptor_set_layout, nullptr);
